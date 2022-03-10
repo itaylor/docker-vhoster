@@ -2,9 +2,6 @@
 
 Listens on the docker socket for containers to start/end and adds entries for them to your `/etc/hosts` file.
 
-* Written in rust
-* Published as slim container on dockerhub as `itaylor/docker-vhoster`
-
 This is designed to be used alongside a tool like `jwilder/nginx-proxy` which creates vhost entries for running services.  It allows you to map them to the hosts file.
 
 ## Configuration
