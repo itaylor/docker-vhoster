@@ -3,6 +3,10 @@ name = "docker-vhoster"
 version = "0.1.0"
 edition = "2021"
 
+# [package.release]
+# opt-level = 's'  # Optimize for size.
+# lto = true # Link Time Optimization (LTO)
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -12,3 +16,5 @@ serde = { version = "1.0", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 chrono = "0.4"
 futures-util = "0.3"
+futures-retry = "0.6.0"
+ctrlc = { version = "3.0", features = ["termination"] }
