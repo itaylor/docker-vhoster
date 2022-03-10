@@ -101,7 +101,7 @@ fn format_vhosts(context: &Context) -> String {
     drop(guard);    
     return result;
 }
-fn handle_connection_error(e: bollard::errors::Error) -> RetryPolicy<bollard::errors::Error> {
+fn handle_connection_error(_e: bollard::errors::Error) -> RetryPolicy<bollard::errors::Error> {
     RetryPolicy::WaitRetry(Duration::minutes(1).to_std().unwrap())
 }
 
