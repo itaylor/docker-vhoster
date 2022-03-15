@@ -10,7 +10,7 @@ services:
       - "/var/run/docker.sock:/tmp/docker.sock:ro"
   
   docker-vhoster:
-    build: ../
+    image: itaylor/docker-vhoster
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
       - "/etc/hosts:/tmp/hosts"
