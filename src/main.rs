@@ -96,7 +96,7 @@ Make sure of the following:
   2. You are running as a user who has access to the file
   3. On Mac and Windows, the `etc/hosts` file is protected by ACLs.  You will need to set an ACL setting to allow your user to modify the the file.
      On Mac this can be done by running this command:
-     `chmod +a \"user:$(whoami) allow read,write,append,readattr,writeattr,readextattr,writeextattr,readsecurity\" /etc/hosts`
+     `sudo chmod +a \"user:$(whoami) allow read,write,append,readattr,writeattr,readextattr,writeextattr,readsecurity\" /etc/hosts`
      See the readme.md for windows directions
 
 If you wish to use a different path, set the `HOST_FILE_LOCATION` env var or pass the `-h` argument.
