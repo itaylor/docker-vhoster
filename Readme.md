@@ -11,7 +11,7 @@ We need to give your user permission to modify the /etc/hosts file.  This is don
 
 On MacOS, run in terminal:
 ```sh
-chmod +a user:$(whoami) allow read,write,append,readattr,writeattr,readextattr,writeextattr,readsecurity /etc/hosts
+chmod +a "user:$(whoami) allow read,write,append,readattr,writeattr,readextattr,writeextattr,readsecurity" /etc/hosts
 ```
 
 On Windows... Powershell is too complex for me to understand how to do it as a script, so in the UI:
