@@ -2,6 +2,9 @@
 name = "docker-vhoster"
 version = "0.1.0"
 edition = "2021"
+[[bin]]
+name = "docker-vhoster"
+path = "src/main.rs"
 
 # [package.release]
 # opt-level = 's'  # Optimize for size.
@@ -10,11 +13,13 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+anyhow = "1.0"
 bollard = "0.11"
-envy = "0.4"
+# envy = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 chrono = "0.4"
 futures-util = "0.3"
 futures-retry = "0.6.0"
 ctrlc = { version = "3.0", features = ["termination"] }
+clap = { version = "3.1", features = ["derive", "env", "color"] }

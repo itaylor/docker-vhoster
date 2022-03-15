@@ -1,4 +1,5 @@
-use serde::Deserialize;
+use anyhow::bail;
+use anyhow::{Context as _Ctx, Result};
 use bollard::{Docker, system::VersionComponents, models::SystemVersionPlatform};
 use core::slice::Iter;
 use std::process;
@@ -12,6 +13,9 @@ use std::fs::{self, OpenOptions};
 use std::io::{prelude::*};
 use ctrlc;
 use futures_retry::{RetryPolicy, FutureRetry};
+use clap::Parser;
+use std::path::Path;
+
 
 macro_rules! collection {
     // map-like
@@ -23,15 +27,16 @@ macro_rules! collection {
         core::convert::From::from([$($v,)*])
     }};
 }
+const DOCKER_SOCK_LOCATION: &str = "/var/run/docker.sock";
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()> {
     ctrlc::set_handler( || {
        eprintln!("Caught signal, exiting...");
        process::exit(130); // same as bash sigint exit code
-    }).expect("Couldn't add signal handler");
+    }).with_context(|| "Unable to add signal handler")?;
 
-    let config = envy::from_env::<Config>().expect("Expected config");
+    let config = Config::parse();
     let curr_containers: HashMap<String, ContainerInfo> = HashMap::new();
     let container_mutex = Arc::new(Mutex::new(curr_containers));
     let host_file_location = config.host_file_location;
@@ -43,7 +48,11 @@ async fn main() {
         vhost_ip_addr,
         host_file_location,
     };
+
     println!("Starting with options: host_file_location:{} env_var_name:{} vhost_ip_addr: {}", context.host_file_location, context.env_var_name, context.vhost_ip_addr);
+
+    check_vhost_file_access(&context.host_file_location).with_context(|| get_file_perms_text(&context.host_file_location))?;
+    check_docker_sock()?;
 
     #[cfg(unix)]
     let docker = Docker::connect_with_socket_defaults().unwrap();
@@ -75,7 +84,23 @@ async fn main() {
             handle_container_start(&id, &docker, &context).await;
         }
     }
-    println!("Docker connection terminated, exiting...")
+    println!("Docker connection terminated, exiting...");
+    Ok(())
+}
+
+fn get_file_perms_text(host_file_location: &String) -> String {
+    format!("File permssions to hosts file at `{}` must be set to allow your user to modify them.
+
+Make sure of the following:
+  1. The file {} exists (you will need to provide it as volume mount if you're using docker)
+  2. You are running as a user who has access to the file
+  3. On Mac and Windows, the `etc/hosts` file is protected by ACLs.  You will need to set an ACL setting to allow your user to modify the the file.
+     On Mac this can be done by running this command:
+     `chmod +a user:$(whoami) allow read,write,append,readattr,writeattr,readextattr,writeextattr,readsecurity /etc/hosts`
+     See the readme.md for windows directions
+
+If you wish to use a different path, set the `HOST_FILE_LOCATION` env var or pass the `-h` argument.
+", host_file_location, host_file_location)
 }
 
 fn handle_container_stop(id: String, context: &Context) {
@@ -97,7 +122,8 @@ fn format_vhosts(context: &Context) -> String {
     let result = guard
         .iter()
         .map(|x| format_vhost_entry(&context.vhost_ip_addr, x.1))
-        .fold(String::new(), |a, b| format!("{}{}", a, b));
+        .collect::<Vec<String>>()
+        .join("\n");
     drop(guard);    
     return result;
 }
@@ -106,8 +132,11 @@ fn handle_connection_error(_e: bollard::errors::Error) -> RetryPolicy<bollard::e
 }
 
 fn format_vhost_entry(ip: &String, ci: &ContainerInfo) -> String {
-    ci.vhosts.iter().fold(String::new(),
-     |a, b| format!("{} {}", ip, a) + b + "\n")
+    let parts= ci.vhosts.iter()
+        .map(|s| format!("{} {}", ip, s))
+        .collect::<Vec<String>>()
+        .join("\n");
+    parts
 }
 
 fn update_vhosts(context: &Context) -> Result<(), std::io::Error> {
@@ -118,7 +147,7 @@ fn update_vhosts(context: &Context) -> Result<(), std::io::Error> {
     let start = contents.find(PREFIX);
     let end = contents.find(SUFFIX);
     let formatted = format_vhosts(context);
-    let curr_text = format!("{}{}{}", PREFIX, formatted, SUFFIX);
+    let curr_text = format!("{}{}\n{}", PREFIX, formatted, SUFFIX);
     let new_content: String = match (start, end) {
         (Some(s), Some(e)) => {
             let last = e + SUFFIX.len();
@@ -133,11 +162,37 @@ fn update_vhosts(context: &Context) -> Result<(), std::io::Error> {
     return Ok(());
 }
 
+// Checks access to the vhost file by attempting to read and write from it.
+fn check_vhost_file_access(host_file_location: &String) -> Result<()> {
+    let contents = fs::read_to_string(host_file_location)
+        .with_context(|| format!("Unable to open {}",  host_file_location))?;
+    let mut file = OpenOptions::new().write(true).open(host_file_location)?;
+    file.write(format!("{}\n", contents).as_bytes())
+        .with_context(|| format!("Unable to write to file {}", host_file_location))?;
+    file.write(contents.as_bytes())
+        .with_context(|| format!("Unable to write to file {}", host_file_location))?;
+    Ok(())
+}
+
+// Checks that /var/run/docker.sock file exists 
+fn check_docker_sock() -> Result<()> {
+    if !Path::new(DOCKER_SOCK_LOCATION).exists() {
+        bail!("Unable to find the unix socket `{}`.  You are probably missing the volume mount for it.", DOCKER_SOCK_LOCATION);
+    }
+    Ok(())
+}
+
+
 async fn handle_container_start(id: &String, docker: &Docker, context: &Context) {
     println!("Container start! {}", id);
 
     let vhosts_str = get_vhosts_from_docker(id.to_string(), context.env_var_name.to_string(), docker).await;
-    let vhosts = split_vhosts_to_vec(vhosts_str);
+    if vhosts_str.is_err() {
+        println!("{:?}", vhosts_str.err());
+        println!("Unable to get vhost from container `{}`, skipping", id);
+        return;
+    }
+    let vhosts = split_vhosts_to_vec(vhosts_str.unwrap());
 
     let mut guard = context.container_mutex.lock().unwrap();
     let cinfo = ContainerInfo {
@@ -146,7 +201,6 @@ async fn handle_container_start(id: &String, docker: &Docker, context: &Context)
     };
     guard.insert(id.to_string(), cinfo);
     drop(guard);
-    println!("{:?}", context);
     let result = update_vhosts(context);
     match result {
         Err(e) => println!("Error updating vhosts file {}", e),
@@ -159,9 +213,9 @@ fn split_vhosts_to_vec(vhosts: String) -> Vec<String>{
    return vec;
 }
 
-async fn get_vhosts_from_docker(id: String, env_var_name: String, docker: &Docker) -> String {
+async fn get_vhosts_from_docker(id: String, env_var_name: String, docker: &Docker) -> Result<String> {
     let fut = docker.inspect_container(&id, None);
-    let result = fut.await.unwrap();
+    let result = fut.await.with_context(|| format!("Unable to inspect container `{}`", id))?;
     // println!("Got vhost from docker {:?}", result);
     let name = result.name.unwrap();
     let env_var_with_eq = format!("{}=", env_var_name);
@@ -171,22 +225,9 @@ async fn get_vhosts_from_docker(id: String, env_var_name: String, docker: &Docke
         .find(|&x|x.starts_with(&env_var_with_eq))
         .and_then(|s| Some(s.clone()));
     return match vhosts {
-        Some(s) => String::from(s).replace(&env_var_with_eq, ""),
-        None => format!("{}.local", name.replace("/", ""))
+        Some(s) => Ok(String::from(s).replace(&env_var_with_eq, "")),
+        None => Ok(format!("{}.local", name.replace("/", "")))
     }
-}
-
-/// provides default value for zoom if ZOOM env var is not set
-fn default_host_file_location() -> String {
-    return String::from("/etc/hosts"); 
-}
-
-fn default_env_var_name() -> String {
-    return String::from("VIRTUAL_HOST");
-}
-
-fn default_vhost_ip_addr() -> String {
-    return String::from("127.0.0.1");
 }
 
 fn get_platform_name(platform: Option<SystemVersionPlatform>, missing_str: &str) -> String {
@@ -224,18 +265,20 @@ fn build_event_filters() -> HashMap<String, Vec<String>> {
     );
     return filters;
 }
-#[derive(Deserialize, Debug)]
+#[derive(Parser, Debug)]
+#[clap(author, version, about, long_about = None)]
 struct Config {
-  #[serde(default="default_host_file_location")]
+  #[clap(short, long, env, default_value="/etc/hosts")]
   host_file_location: String,
-  #[serde(default="default_env_var_name")]
+  #[clap(short, long, env, default_value="VIRTUAL_HOST")]
   env_var_name: String,
-  #[serde(default="default_vhost_ip_addr")]
+  #[clap(short, long, env, default_value="127.0.0.1")]
   vhost_ip_addr: String  
 }
 
 #[derive(Debug)]
 struct ContainerInfo {
+    #[allow(dead_code)] // Really hard to debug without the id there...
     id: String,
     vhosts: Vec<String>,
 }

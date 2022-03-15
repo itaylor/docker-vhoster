@@ -1,0 +1,32 @@
+# An example docker-compose config that uses jwilder/nginx-proxy and itaylor/docker-vhoster to automatically add /etc/hosts entries
+services: 
+  
+  nginx-proxy:
+    image: jwilder/nginx-proxy
+    ports:
+      - 80:80
+      - 443:443
+    volumes:
+      - "/var/run/docker.sock:/tmp/docker.sock:ro"
+  
+  docker-vhoster:
+    build: ../
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "/etc/hosts:/tmp/hosts"
+    #  For windows, use below instead: 
+    #  - C:\Windows\System32\drivers\etc\hosts:/tmp/hosts      
+    environment:
+      - HOST_FILE_LOCATION=/tmp/hosts
+
+  web-example:
+    image: node:16
+    volumes:
+      - "./helloworld.js:/app/helloworld.js"
+    command: node /app/helloworld.js
+    expose:
+      - 3000
+    environment:
+      # The values set here will be used by both nginx-proxy to setup nginx
+      # And by docker-vhoster to edit the /etc/hosts entries
+      - VIRTUAL_HOST=web-example.fake.com,web-example.local

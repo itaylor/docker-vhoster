@@ -1,23 +1,30 @@
 FROM rust:1.59 as BUILD
 
 ARG RUSTFLAGS='-C link-arg=-s'
-ARG TARGET='x86_64-unknown-linux-musl'
+ARG TARGETPLATFORM
+RUN case "$TARGETPLATFORM" in \
+  "linux/amd64") echo x86_64-unknown-linux-musl > /rust_target.txt ;; \
+  "linux/arm64") echo aarch64-unknown-linux-musl > /rust_target.txt ;; \
+  *) exit 1 ;; \
+esac
 
-RUN USER=root cargo new --bin docker-vhoster
-WORKDIR /docker-vhoster
+RUN mkdir /build && cd /build &&\
+  USER=root cargo new --bin docker-vhoster &&\
+  cargo install cargo-build-deps &&\
+  rustup target add $(cat /rust_target.txt)
+WORKDIR /build/docker-vhoster
 
 # copy over your manifests
-COPY ./Cargo.toml ./Cargo.toml
+COPY ./Cargo.toml ./Cargo.lock ./
 
 ENV RUSTFLAGS=${RUSTFLAGS}
 # cache deps
-RUN rustup target add ${TARGET} && cargo build --release --target ${TARGET} && rm src/*.rs
-COPY ./src /docker-vhoster/src
+RUN cargo build-deps --release --target=$(cat /rust_target.txt)
+COPY ./src /build/docker-vhoster/src
 # build as a statically linked library
-RUN cargo build --release --target ${TARGET} --bin docker-vhoster
-#RUN ls -alh /docker-vhoster/target/${TARGET} && exit 1  
+RUN cargo build --release --target $(cat /rust_target.txt) --bin docker-vhoster &&\
+  mv /build/docker-vhoster/target/$(cat /rust_target.txt)/release/docker-vhoster /
 
 FROM scratch
-ARG TARGET='x86_64-unknown-linux-musl'
-COPY --from=BUILD /docker-vhoster/target/${TARGET}/release/docker-vhoster /
+COPY --from=BUILD /docker-vhoster /
 CMD ["/docker-vhoster"]
