@@ -30,3 +30,4 @@ services:
       # The values set here will be used by both nginx-proxy to setup nginx
       # And by docker-vhoster to edit the /etc/hosts entries
       - VIRTUAL_HOST=web-example.fake.com,web-example.local
+      - ETC_HOST=another-example.fake.com

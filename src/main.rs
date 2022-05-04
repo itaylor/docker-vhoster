@@ -39,12 +39,14 @@ async fn main() -> Result<()> {
     let config = Config::parse();
     let curr_containers: HashMap<String, ContainerInfo> = HashMap::new();
     let container_mutex = Arc::new(Mutex::new(curr_containers));
+    let writelock_mutex = Arc::new(Mutex::new(false));
     let host_file_location = config.host_file_location;
     let env_var_name: String = config.env_var_name;
     let vhost_ip_addr: String = config.vhost_ip_addr;
     let context = Context {
         env_var_name,
         container_mutex,
+        writelock_mutex,
         vhost_ip_addr,
         host_file_location,
     };
@@ -140,6 +142,8 @@ fn format_vhost_entry(ip: &String, ci: &ContainerInfo) -> String {
 }
 
 fn update_vhosts(context: &Context) -> Result<(), std::io::Error> {
+    // TODO: is a Mutex the "right" Rusty way to synchronize a function?  
+    let mut lock = context.writelock_mutex.lock().unwrap();
     println!("Updating vhost file {}", &context.host_file_location);
     const PREFIX: &str = "# docker-vhoster managed block\n";
     const SUFFIX: &str = "# docker-vhoster block end\n";
@@ -159,6 +163,7 @@ fn update_vhosts(context: &Context) -> Result<(), std::io::Error> {
     let mut file = OpenOptions::new().write(true).open(&context.host_file_location)?;
     file.write(new_content.as_bytes())?;
     println!("Wrote vhost content: \n{}", curr_text);
+    *lock = false;
     return Ok(());
 }
 
@@ -186,13 +191,7 @@ fn check_docker_sock() -> Result<()> {
 async fn handle_container_start(id: &String, docker: &Docker, context: &Context) {
     println!("Container start! {}", id);
 
-    let vhosts_str = get_vhosts_from_docker(id.to_string(), context.env_var_name.to_string(), docker).await;
-    if vhosts_str.is_err() {
-        println!("{:?}", vhosts_str.err());
-        println!("Unable to get vhost from container `{}`, skipping", id);
-        return;
-    }
-    let vhosts = split_vhosts_to_vec(vhosts_str.unwrap());
+    let vhosts = get_vhosts_from_docker(id.to_string(), context.env_var_name.to_string(), docker).await;
 
     let mut guard = context.container_mutex.lock().unwrap();
     let cinfo = ContainerInfo {
@@ -208,25 +207,29 @@ async fn handle_container_start(id: &String, docker: &Docker, context: &Context)
     }
 }
 
-fn split_vhosts_to_vec(vhosts: String) -> Vec<String>{
-   let vec: Vec<String> = vhosts.split(",").map(|v|String::from(v)).collect();
-   return vec;
+fn container_config_to_vhost_names(vn: String, iter: Iter<String>) -> Vec<String> {
+    iter.filter(|&x| x.starts_with(&vn))
+    .flat_map(|x| x.replace(&vn, "")
+        .split(",")
+        .map(|v|String::from(v))
+        .collect::<Vec<String>>()
+    ).collect()
 }
 
-async fn get_vhosts_from_docker(id: String, env_var_name: String, docker: &Docker) -> Result<String> {
+async fn get_vhosts_from_docker(id: String, env_var_name: String, docker: &Docker) -> Vec<String> {
     let fut = docker.inspect_container(&id, None);
-    let result = fut.await.with_context(|| format!("Unable to inspect container `{}`", id))?;
+    let result = fut.await.with_context(|| format!("Unable to inspect container `{}`", id)).unwrap();
     // println!("Got vhost from docker {:?}", result);
     let name = result.name.unwrap();
-    let env_var_with_eq = format!("{}=", env_var_name);
-    let vhosts = result.config
-        .unwrap().env.unwrap()
-        .iter()
-        .find(|&x|x.starts_with(&env_var_with_eq))
-        .and_then(|s| Some(s.clone()));
-    return match vhosts {
-        Some(s) => Ok(String::from(s).replace(&env_var_with_eq, "")),
-        None => Ok(format!("{}.local", name.replace("/", "")))
+    let var_names = env_var_name.as_str().split(",").map(|s| format!("{}=", s));
+    let env = result.config.unwrap().env.unwrap();
+    let vhosts: Vec<String> = var_names.flat_map(|vn| {
+        return container_config_to_vhost_names(vn, env.iter());
+    }).collect();
+    
+    match vhosts.len() {
+        0 => vec!(format!("{}.local", name.replace("/", ""))),
+        _ => vhosts,
     }
 }
 
@@ -270,7 +273,7 @@ fn build_event_filters() -> HashMap<String, Vec<String>> {
 struct Config {
   #[clap(short, long, env, default_value="/etc/hosts")]
   host_file_location: String,
-  #[clap(short, long, env, default_value="VIRTUAL_HOST")]
+  #[clap(short, long, env, default_value="VIRTUAL_HOST,ETC_HOST")]
   env_var_name: String,
   #[clap(short, long, env, default_value="127.0.0.1")]
   vhost_ip_addr: String  
@@ -286,6 +289,7 @@ struct ContainerInfo {
 #[derive(Debug)]
 struct Context {
     container_mutex: Arc<Mutex<HashMap<String, ContainerInfo>>>,
+    writelock_mutex: Arc<Mutex<bool>>,
     host_file_location: String,
     env_var_name: String,
     vhost_ip_addr: String,   

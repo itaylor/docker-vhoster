@@ -3,7 +3,7 @@
 Listens on the docker socket for containers to start/end and adds entries for them to your `/etc/hosts` file.
 
 This is designed to be used alongside a tool like `jwilder/nginx-proxy` which creates vhost entries for running services.  
-If you follow it's pattern for setting `VIRTUAL_HOST` environment variables that program nginx, this will allow those same variables to also control your `/etc/hosts` file.
+If you follow its pattern for setting `VIRTUAL_HOST` environment variables that program nginx, this will allow those same variables to also control your `/etc/hosts` file.
 
 ## One time setup:
 
@@ -36,7 +36,7 @@ All options can be set as cli arguments or as env vars
 | argument                           | env var              | default       | description |
 | ---------------------------------- | -------------------- | ------------- | ----------- |
 | `-h, --host-file-location <path>`  | `HOST_FILE_LOCATION` | `/etc/hosts`  | The path to the hosts file to modify |
-| `-e, --env-var-name <string>`      | `ENV_VAR_NAME`       | `VIRTUAL_HOST`| The env var used to look up the host name on a per-container basis | 
+| `-e, --env-var-name <string>`      | `ENV_VAR_NAME`       | `VIRTUAL_HOST,ETC_HOST`| The comma separated env vars used to look up the host name on a per-container basis | 
 | `-v, --vhost-ip-addr <ip address>` | `VHOST_IP_ADDR`      | `127.0.0.1`   | The IP address to set in the /etc/hosts file |
 
 ## Required file/volume mount!
@@ -56,3 +56,8 @@ docker-compose up
 Once the containers start you'll be able to open a browser to `http://web-example.fake.com` and have it display a hello world message.
 
 *Note* if using Docker for windows, you'll have to change the `example/docker-compose.yml` to have the correct path to Windows' `etc/hosts` file.
+
+
+##  Changelog
+`0.2.0`: Allows multiple env vars to be used to determine host names to set.  New default is `VIRTUAL_HOST,ETC_HOST` so either (or both) env vars can be used on containers to control the `etc/hosts` entries.  Also adds additional handling to prevent race conditions writing to `/etc/hosts files`.  Updates to build with Rust 1.60.
+`0.1.0`: Initial release

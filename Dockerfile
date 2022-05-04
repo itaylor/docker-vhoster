@@ -1,4 +1,4 @@
-FROM rust:1.59 as BUILD
+FROM rust:1.60 as BUILD
 
 ARG RUSTFLAGS='-C link-arg=-s'
 ARG TARGETPLATFORM
