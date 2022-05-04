@@ -160,7 +160,7 @@ fn update_vhosts(context: &Context) -> Result<(), std::io::Error> {
         },
         _ => contents + "\n" + curr_text.as_str(),
     };
-    let mut file = OpenOptions::new().write(true).open(&context.host_file_location)?;
+    let mut file = OpenOptions::new().write(true).truncate(true).open(&context.host_file_location)?;
     file.write(new_content.as_bytes())?;
     println!("Wrote vhost content: \n{}", curr_text);
     *lock = false;

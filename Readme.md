@@ -59,5 +59,6 @@ Once the containers start you'll be able to open a browser to `http://web-exampl
 
 
 ##  Changelog
+`0.2.1`: Fix host file to truncate when writing
 `0.2.0`: Allows multiple env vars to be used to determine host names to set.  New default is `VIRTUAL_HOST,ETC_HOST` so either (or both) env vars can be used on containers to control the `etc/hosts` entries.  Also adds additional handling to prevent race conditions writing to `/etc/hosts files`.  Updates to build with Rust 1.60.
 `0.1.0`: Initial release
