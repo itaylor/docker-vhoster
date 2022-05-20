@@ -148,6 +148,7 @@ fn update_vhosts(context: &Context) -> Result<(), std::io::Error> {
     const PREFIX: &str = "# docker-vhoster managed block\n";
     const SUFFIX: &str = "# docker-vhoster block end\n";
     let mut contents = fs::read_to_string(&context.host_file_location)?;
+    // println!("READ hosts file: \n{}", contents);
     let start = contents.find(PREFIX);
     let end = contents.find(SUFFIX);
     let formatted = format_vhosts(context);
@@ -162,6 +163,7 @@ fn update_vhosts(context: &Context) -> Result<(), std::io::Error> {
     };
     let mut file = OpenOptions::new().write(true).truncate(true).open(&context.host_file_location)?;
     file.write(new_content.as_bytes())?;
+    // println!("WROTE hosts file: \n{}", new_content);
     println!("Wrote vhost content: \n{}", curr_text);
     *lock = false;
     return Ok(());
@@ -171,9 +173,7 @@ fn update_vhosts(context: &Context) -> Result<(), std::io::Error> {
 fn check_vhost_file_access(host_file_location: &String) -> Result<()> {
     let contents = fs::read_to_string(host_file_location)
         .with_context(|| format!("Unable to open {}",  host_file_location))?;
-    let mut file = OpenOptions::new().write(true).open(host_file_location)?;
-    file.write(format!("{}\n", contents).as_bytes())
-        .with_context(|| format!("Unable to write to file {}", host_file_location))?;
+    let mut file = OpenOptions::new().write(true).truncate(true).open(host_file_location)?;
     file.write(contents.as_bytes())
         .with_context(|| format!("Unable to write to file {}", host_file_location))?;
     Ok(())
