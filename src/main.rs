@@ -163,6 +163,7 @@ fn update_vhosts(context: &Context) -> Result<(), std::io::Error> {
     };
     let mut file = OpenOptions::new().write(true).truncate(true).open(&context.host_file_location)?;
     file.write(new_content.as_bytes())?;
+    file.sync_all()?;
     // println!("WROTE hosts file: \n{}", new_content);
     println!("Wrote vhost content: \n{}", curr_text);
     *lock = false;
@@ -176,6 +177,7 @@ fn check_vhost_file_access(host_file_location: &String) -> Result<()> {
     let mut file = OpenOptions::new().write(true).truncate(true).open(host_file_location)?;
     file.write(contents.as_bytes())
         .with_context(|| format!("Unable to write to file {}", host_file_location))?;
+    file.sync_all()?;
     Ok(())
 }
 
