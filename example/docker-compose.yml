@@ -18,6 +18,7 @@ services:
     #  - C:\Windows\System32\drivers\etc\hosts:/tmp/hosts      
     environment:
       - HOST_FILE_LOCATION=/tmp/hosts
+      - RUST_BACKTRACE=full
 
   web-example:
     image: node:16

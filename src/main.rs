@@ -1,11 +1,10 @@
 use anyhow::bail;
 use anyhow::{Context as _Ctx, Result};
-use bollard::{Docker, system::VersionComponents, models::SystemVersionPlatform};
+use bollard::{Docker, system::VersionComponents, models::SystemVersionPlatform, container::ListContainersOptions};
 use core::slice::Iter;
+use std::io::Error;
 use std::process;
 use bollard::system::EventsOptions;
-use chrono::Utc;
-use chrono::Duration;
 use futures_util::TryStreamExt;
 use std::collections::{HashMap};
 use std::sync::{Arc, Mutex};
@@ -15,6 +14,7 @@ use ctrlc;
 use futures_retry::{RetryPolicy, FutureRetry};
 use clap::Parser;
 use std::path::Path;
+use futures::future;
 
 
 macro_rules! collection {
@@ -70,9 +70,12 @@ async fn main() -> Result<()> {
     let engine_ver = get_engine_ver(version.components, missing_str);
 
     println!("Connected to {}, {}", ver_name, engine_ver);
+
+    println!("Fetching initial container list");
+    handle_containers_change(&docker, &context).await?;
     let filters = build_event_filters();
     let mut event_stream = docker.events(Some(EventsOptions::<String> {
-        since: Some(Utc::now() - Duration::minutes(1)),
+        since: None,
         until: None,
         filters,
     }));
@@ -83,7 +86,7 @@ async fn main() -> Result<()> {
         if action.eq("die") || action.eq("stop") {
             handle_container_stop(id, &context);
         } else if action.eq("start") {
-            handle_container_start(&id, &docker, &context).await;
+            handle_container_start(&id, &docker, &context).await?;
         }
     }
     println!("Docker connection terminated, exiting...");
@@ -130,7 +133,7 @@ fn format_vhosts(context: &Context) -> String {
     return result;
 }
 fn handle_connection_error(_e: bollard::errors::Error) -> RetryPolicy<bollard::errors::Error> {
-    RetryPolicy::WaitRetry(Duration::minutes(1).to_std().unwrap())
+    RetryPolicy::WaitRetry(std::time::Duration::from_secs(60))
 }
 
 fn format_vhost_entry(ip: &String, ci: &ContainerInfo) -> String {
@@ -189,10 +192,18 @@ fn check_docker_sock() -> Result<()> {
     Ok(())
 }
 
+async fn handle_containers_change(docker: &Docker, context: &Context) -> Result<(),Error> {
+    let options = Some(ListContainersOptions::<String>{
+        ..Default::default()
+    });
+    let containers = docker.list_containers(options).await.unwrap(); 
+    let futures = containers.iter().map(|c| get_vhosts_for_container(c.id.as_ref().unwrap(), docker, context)); 
+    future::try_join_all(futures).await?;
+    update_vhosts(context)?;
+    return Ok(());
+}
 
-async fn handle_container_start(id: &String, docker: &Docker, context: &Context) {
-    println!("Container start! {}", id);
-
+async fn get_vhosts_for_container(id: &String, docker: &Docker, context: &Context) -> Result<(), std::io::Error> {
     let vhosts = get_vhosts_from_docker(id.to_string(), context.env_var_name.to_string(), docker).await;
 
     let mut guard = context.container_mutex.lock().unwrap();
@@ -202,11 +213,13 @@ async fn handle_container_start(id: &String, docker: &Docker, context: &Context)
     };
     guard.insert(id.to_string(), cinfo);
     drop(guard);
-    let result = update_vhosts(context);
-    match result {
-        Err(e) => println!("Error updating vhosts file {}", e),
-        _ => ()
-    }
+    return Ok(());
+}
+
+async fn handle_container_start(id: &String, docker: &Docker, context: &Context) -> Result<(), std::io::Error> {
+    println!("Container start! {}", id);
+    handle_containers_change(docker, context).await?;
+    return Ok(());
 }
 
 fn container_config_to_vhost_names(vn: String, iter: Iter<String>) -> Vec<String> {
@@ -219,9 +232,11 @@ fn container_config_to_vhost_names(vn: String, iter: Iter<String>) -> Vec<String
 }
 
 async fn get_vhosts_from_docker(id: String, env_var_name: String, docker: &Docker) -> Vec<String> {
-    let fut = docker.inspect_container(&id, None);
-    let result = fut.await.with_context(|| format!("Unable to inspect container `{}`", id)).unwrap();
-    // println!("Got vhost from docker {:?}", result);
+    let fut = docker.inspect_container(&id, None).await;
+    let result = match fut {
+        Ok(r) => r,
+        Err(_) => return Vec::<String>::new()
+    };
     let name = result.name.unwrap();
     let var_names = env_var_name.as_str().split(",").map(|s| format!("{}=", s));
     let env = result.config.unwrap().env.unwrap();
